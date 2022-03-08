@@ -20,7 +20,12 @@ end project_reti_logiche;
 architecture rtl of project_reti_logiche is
     
     type t_state is (state00, state01, state10, state11);
-    signal STATE : t_state := state00;
+    signal STATE : t_state := state01;
+    
+    constant read_address : unsigned (15 downto 0) := x"0000";
+    constant write_address : unsigned (15 downto 0) := x"03E8";
+    
+    signal internal_rst : std_logic := '0';
     signal firstpart : std_logic_vector(7 downto 0);
     signal secondpart : std_logic_vector(7 downto 0);
     
@@ -89,16 +94,46 @@ architecture rtl of project_reti_logiche is
         end procedure;
     
 begin
+    
     o_en <= '1';
-    o_address <= x"0001";
-    
-    process(i_start)
-    
+    process
+    variable nByte : integer := 0;
     begin
-        if rising_edge(i_start) then
-            convolutional_12(i_data, STATE, firstpart, secondpart);
+        
+        if i_rst = '1' then    
+            STATE <= state00;
+            o_address <= std_logic_vector(read_address);
         end if;
+        
+        if i_start = '1' then
+            if read_address = x"0000" then
+                nByte := to_integer(unsigned(i_data)); 
+            end if;
+            for i in 1 to nByte loop
+                wait until rising_edge(i_clk);
+                o_address <= std_logic_vector(read_address + i);
+                wait until rising_edge(i_clk);
+                wait until rising_edge(i_clk);
+                convolutional_12(i_data, STATE, firstpart, secondpart);
+                o_we <= '1';
+                o_address <= std_logic_vector(write_address + (i*2) - 2);
+                wait until rising_edge(i_clk);
+                o_data <= firstpart;
+                wait until rising_edge(i_clk);
+                o_address <= std_logic_vector(write_address + (i*2) - 1);
+                wait until rising_edge(i_clk);
+                o_data <= secondpart;  
+                wait until rising_edge(i_clk);                              
+                o_we <= '0';
+                wait until rising_edge(i_clk);              
+            end loop;
+            o_done <= '1';
+            wait until i_start = '0';
+            o_done <= '0';
+        end if;
+        wait for 10 ns;
     end process;
+    
     
     
 end architecture;
