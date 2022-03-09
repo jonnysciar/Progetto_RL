@@ -19,29 +19,36 @@ end project_reti_logiche;
 
 architecture rtl of project_reti_logiche is
     
-    type t_state is (state00, state01, state10, state11);
-    signal STATE : t_state := state01;
+    type conv_state is (state00, state01, state10, state11);
+    signal STATE : conv_state;
+    
+    type inout_state is (RST, READ, WAIT_READ, WRITE, WAIT_WRITE1, WAIT_WRITE2, DONE);
+    signal sig_state : inout_state;
     
     constant read_address : unsigned (15 downto 0) := x"0000";
     constant write_address : unsigned (15 downto 0) := x"03E8";
     
-    signal internal_rst : std_logic := '0';
-    signal firstpart : std_logic_vector(7 downto 0);
-    signal secondpart : std_logic_vector(7 downto 0);
+    signal toBe_read : unsigned (15 downto 0);
+    signal toBe_write : unsigned (15 downto 0);
     
-    procedure convolutional_12 (signal data_in : in std_logic_vector(7 downto 0);
-                                signal state : inout t_state;
+    signal nByte : integer := 0;
+    
+    signal firstByte : std_logic_vector(7 downto 0);
+    signal secondByte : std_logic_vector(7 downto 0);
+    
+    procedure conv_12 (signal data_in : in std_logic_vector(7 downto 0);
+                                signal state_param : inout conv_state;
                                 signal byte1 : out std_logic_vector(7 downto 0);
                                 signal byte2 : out std_logic_vector(7 downto 0)) is
         
-        variable state_var : t_state;
+        variable state_var : conv_state;
         variable full_output : std_logic_vector(15 downto 0);
         
         variable pk1 : integer;
         variable pk2 : integer;
         
         begin
-            state_var := state;
+            state_var := state_param;
             for i in 7 downto 0 loop
                 pk1 := (2*i) + 1;
                 pk2 := 2*i;
@@ -88,52 +95,94 @@ architecture rtl of project_reti_logiche is
                         end if;
                 end case;
             end loop;
-            state <= state_var;
+            state_param <= state_var;
             byte1 <= full_output(15 downto 8);
             byte2 <= full_output(7 downto 0);
         end procedure;
     
 begin
     
-    o_en <= '1';
-    process
-    variable nByte : integer := 0;
+    
+    
+    process (i_clk)
     begin
         
-        if i_rst = '1' then    
-            STATE <= state00;
-            o_address <= std_logic_vector(read_address);
-        end if;
+        if rising_edge(i_clk) then
         
-        if i_start = '1' then
-            if read_address = x"0000" then
-                nByte := to_integer(unsigned(i_data)); 
-            end if;
-            for i in 1 to nByte loop
-                wait until rising_edge(i_clk);
-                o_address <= std_logic_vector(read_address + i);
-                wait until rising_edge(i_clk);
-                wait until rising_edge(i_clk);
-                convolutional_12(i_data, STATE, firstpart, secondpart);
-                o_we <= '1';
-                o_address <= std_logic_vector(write_address + (i*2) - 2);
-                wait until rising_edge(i_clk);
-                o_data <= firstpart;
-                wait until rising_edge(i_clk);
-                o_address <= std_logic_vector(write_address + (i*2) - 1);
-                wait until rising_edge(i_clk);
-                o_data <= secondpart;  
-                wait until rising_edge(i_clk);                              
+            if i_rst = '1' then
+                sig_state <= RST;
+                STATE <= state00;
+                toBe_read <= read_address;
+                toBe_write <= write_address;
+                o_en <= '1';
                 o_we <= '0';
-                wait until rising_edge(i_clk);              
-            end loop;
-            o_done <= '1';
-            wait until i_start = '0';
-            o_done <= '0';
+                
+            elsif i_start = '1' then
+                case sig_state is
+                    when RST =>
+                        sig_state <= READ;
+                        STATE <= state00;
+                        toBe_read <= read_address;
+                        toBe_write <= write_address;
+                        o_en <= '1';
+                        o_we <= '0';
+                        
+                    when READ =>
+                        if toBe_read = read_address then
+                            nByte <= to_integer(unsigned(i_data));
+                        end if;
+                        o_we <= '0';
+                        sig_state <= WAIT_READ;
+                        o_address <= std_logic_vector(toBe_read + 1);
+                        toBe_read <= toBe_read + 1; 
+                        
+                    when WAIT_READ =>
+                        if toBe_read > read_address + nByte then
+                            sig_state <= DONE;
+                        else
+                            sig_state <= WRITE;
+                        end if;
+                        
+                    when WRITE =>
+                        sig_state <= WAIT_WRITE1;
+                        conv_12(i_data, STATE, firstByte, secondByte);
+                        o_we <= '1';
+                        --o_address <= std_logic_vector(toBe_write);
+                        
+                    when WAIT_WRITE1 =>
+                        sig_state <= WAIT_WRITE2;
+                        o_data <= firstByte;
+                        o_address <= std_logic_vector(toBe_write);
+                        toBe_write <= toBe_write + 1;
+                        
+                    when WAIT_WRITE2 =>
+                        sig_state <= READ;
+                        o_data <= secondByte;
+                        o_address <= std_logic_vector(toBe_write);
+                        toBe_write <= toBe_write + 1;
+                        --o_we <= '0';
+                    when DONE =>
+                        sig_state <= DONE;
+                        o_done <= '1';
+                        
+                end case;
+            
+            elsif sig_state = DONE and i_start = '0' then
+                sig_state <= RST;
+                o_done <= '0';     
+            end if;
+            
         end if;
-        wait for 10 ns;
     end process;
     
     
-    
 end architecture;
+
+
+
+
+
+
+
+
+
