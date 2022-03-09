@@ -20,9 +20,9 @@ end project_reti_logiche;
 architecture rtl of project_reti_logiche is
     
     type conv_state is (state00, state01, state10, state11);
-    signal STATE : conv_state;
+    signal STATE : conv_state := state00;
     
-    type inout_state is (RST, READ, WAIT_READ, WRITE, WAIT_WRITE1, WAIT_WRITE2, DONE);
+    type inout_state is (RST, START, READ, WAIT_READ, WRITE, WAIT_WRITE1, WAIT_WRITE2, DONE);
     signal sig_state : inout_state;
     
     constant read_address : unsigned (15 downto 0) := x"0000";
@@ -100,9 +100,7 @@ architecture rtl of project_reti_logiche is
             byte2 <= full_output(7 downto 0);
         end procedure;
     
-begin
-    
-    
+begin    
     
     process (i_clk)
     begin
@@ -111,48 +109,60 @@ begin
         
             if i_rst = '1' then
                 sig_state <= RST;
-                STATE <= state00;
-                toBe_read <= read_address;
-                toBe_write <= write_address;
-                o_en <= '1';
-                o_we <= '0';
+                --STATE <= state00;
+                --toBe_read <= read_address;
+                --toBe_write <= write_address;
+                --o_en <= '1';
+                --o_we <= '0';
                 
             elsif i_start = '1' then
                 case sig_state is
                     when RST =>
-                        sig_state <= READ;
+                        sig_state <= START;
                         STATE <= state00;
                         toBe_read <= read_address;
                         toBe_write <= write_address;
+                        o_address <= std_logic_vector(read_address);
                         o_en <= '1';
                         o_we <= '0';
+                        o_done <= '0';
+                        
+                    when START =>
+                        sig_state <= READ;
                         
                     when READ =>
+                        o_we <= '0';
                         if toBe_read = read_address then
                             nByte <= to_integer(unsigned(i_data));
+                            toBe_read <= toBe_read + 1;
+                            
+                        elsif toBe_read <= read_address + nByte then
+                            
+                            sig_state <= WAIT_READ;
+                            o_address <= std_logic_vector(toBe_read);
+                            
+                        else
+                            sig_state <= DONE;
+                            
                         end if;
-                        o_we <= '0';
-                        sig_state <= WAIT_READ;
-                        o_address <= std_logic_vector(toBe_read + 1);
-                        toBe_read <= toBe_read + 1; 
                         
                     when WAIT_READ =>
-                        if toBe_read > read_address + nByte then
+                        if toBe_read = read_address then
                             sig_state <= DONE;
                         else
                             sig_state <= WRITE;
+                            toBe_read <= toBe_read + 1;
                         end if;
                         
                     when WRITE =>
                         sig_state <= WAIT_WRITE1;
                         conv_12(i_data, STATE, firstByte, secondByte);
-                        o_we <= '1';
-                        --o_address <= std_logic_vector(toBe_write);
                         
                     when WAIT_WRITE1 =>
                         sig_state <= WAIT_WRITE2;
                         o_data <= firstByte;
                         o_address <= std_logic_vector(toBe_write);
+                        o_we <= '1';
                         toBe_write <= toBe_write + 1;
                         
                     when WAIT_WRITE2 =>
@@ -160,16 +170,17 @@ begin
                         o_data <= secondByte;
                         o_address <= std_logic_vector(toBe_write);
                         toBe_write <= toBe_write + 1;
-                        --o_we <= '0';
+
                     when DONE =>
                         sig_state <= DONE;
                         o_done <= '1';
+                        o_address <= std_logic_vector(read_address);
                         
                 end case;
             
             elsif sig_state = DONE and i_start = '0' then
                 sig_state <= RST;
-                o_done <= '0';     
+                o_done <= '0';
             end if;
             
         end if;
@@ -177,12 +188,3 @@ begin
     
     
 end architecture;
-
-
-
-
-
-
-
-
-
